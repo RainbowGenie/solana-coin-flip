@@ -7,7 +7,7 @@ import Coin from './Coin';
 import './CoinToss.css';
 
 
-const COIN_FLIP_AMOUNT = 1000000000; // 1 SOL in lamports (1 SOL = 1,000,000,000 lamports)
+const COIN_FLIP_AMOUNT = 10000000; // 0.01 SOL in lamports (1 SOL = 1,000,000,000 lamports)
 const HOUSE_PUBLIC_KEY = new PublicKey('APu8XaL1L8vHFiBdcVWxDcU2uouFiWJFMG8ePTW8mBPz'); // Replace with the house's public key
 
 const CoinFlip = ({ coinFace = [heads, tails] }) => {
@@ -27,7 +27,7 @@ const CoinFlip = ({ coinFace = [heads, tails] }) => {
   }
 
   const toss = () => {
-    
+
     setFlipAnimation(true);
 
     const changeFace = randomCoinFace();
@@ -81,14 +81,15 @@ const CoinFlip = ({ coinFace = [heads, tails] }) => {
     setLoading(true);
     setResult(null);
 
-    const isHeads = Math.random() < 0.5; // Randomly determine if the outcome is heads or tails
-
     try {
-      const recipientPublicKey = isHeads ? publicKey : HOUSE_PUBLIC_KEY;
+      const isHeads = changeFace === heads;
+      const fromPubkey = isHeads ? HOUSE_PUBLIC_KEY : publicKey; // House pays if the user wins
+      const toPubkey = isHeads ? publicKey : HOUSE_PUBLIC_KEY;   // User pays if they lose
+
       const transaction = new Transaction().add(
         SystemProgram.transfer({
-          fromPubkey: publicKey,
-          toPubkey: recipientPublicKey,
+          fromPubkey,
+          toPubkey,
           lamports: COIN_FLIP_AMOUNT,
         })
       );
@@ -96,7 +97,7 @@ const CoinFlip = ({ coinFace = [heads, tails] }) => {
       const signature = await sendTransaction(transaction, connection);
       await connection.confirmTransaction(signature, 'processed');
 
-      setResult(isHeads ? 'You win 1 SOL!' : 'You lose 1 SOL.');
+      setResult(isHeads ? 'You win 0.01 SOL!' : 'You lose 0.01 SOL.');
     } catch (error) {
       console.error('Transaction failed:', error);
       setResult('Transaction failed. Please try again.');
@@ -131,7 +132,7 @@ const CoinFlip = ({ coinFace = [heads, tails] }) => {
       <p>
         Out of {flips}, there has been {headsCount} heads and {tailsCount} tails.
       </p>
-      {}
+      { }
       {result && <p>{result}</p>}
     </div>
   );
