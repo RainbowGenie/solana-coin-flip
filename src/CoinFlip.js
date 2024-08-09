@@ -1,17 +1,36 @@
 import React, { useState } from 'react';
-import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
+import { PublicKey, Transaction, SystemProgram, Keypair, Connection, sendAndConfirmTransaction,sendTransaction,confirmTransaction } from '@solana/web3.js';
+import bs58 from 'bs58';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import heads from '../public/heads.png'; // Adjust the import according to your file structure
 import tails from '../public/tails.png'; // Adjust the import according to your file structure
 import Coin from './Coin';
 import './CoinToss.css';
 
+// Base58-encoded private key string from your Phantom wallet
+const PRIVATE_KEY_STRING = '5a8Rps3roVWvG4FUZnCSoN8Fe6fVgGdXyWLYTBt18fPDVLGg9PJaxEi11VEa5opbC4fj4oKfVqQ2JrXJBaKVZUsn';
 
-const COIN_FLIP_AMOUNT = 10000000; // 0.01 SOL in lamports (1 SOL = 1,000,000,000 lamports)
+// Decode the private key from Base58
+const privateKey = bs58.decode(PRIVATE_KEY_STRING);
+
+// Create a Keypair from the decoded private key
+const keypair = Keypair.fromSecretKey(privateKey);
+
+// Get the 64-byte secret key (private key + public key)
+const secretKey = keypair.secretKey;
+const HOUSE_SECRET_KEY = new Uint8Array(secretKey); // Replace with actual secret key
+const houseKeypair = Keypair.fromSecretKey(HOUSE_SECRET_KEY);
+
+const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
+
+
+// const COIN_FLIP_AMOUNT = 1000 * 1e5; // 0.01 SOL in lamports (1 SOL = 1,000,000,000 lamports)
+const SOL_FLIP_AMOUNT = 0.01 * 1e9;
 const HOUSE_PUBLIC_KEY = new PublicKey('APu8XaL1L8vHFiBdcVWxDcU2uouFiWJFMG8ePTW8mBPz'); // Replace with the house's public key
 
+
 const CoinFlip = ({ coinFace = [heads, tails] }) => {
-  const { connection } = useConnection();
+  // const { connection } = useConnection();
   const { publicKey, sendTransaction } = useWallet();
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -21,6 +40,7 @@ const CoinFlip = ({ coinFace = [heads, tails] }) => {
   const [flips, setFlips] = useState(0);
   const [headsCount, setHeadsCount] = useState(0);
   const [tailsCount, setTailsCount] = useState(0);
+  const [userBalance, setUserBalance] = useState();
 
   function randomCoinFace() {
     return coinFace[Math.floor(Math.random() * coinFace.length)];
@@ -85,17 +105,78 @@ const CoinFlip = ({ coinFace = [heads, tails] }) => {
       const isHeads = changeFace === heads;
       const fromPubkey = isHeads ? HOUSE_PUBLIC_KEY : publicKey; // House pays if the user wins
       const toPubkey = isHeads ? publicKey : HOUSE_PUBLIC_KEY;   // User pays if they lose
+      console.log('From Pubkey:', fromPubkey.toBase58());
+      console.log('To Pubkey:', toPubkey.toBase58());
+
+      // Check balances before attempting to send
+      const fromBalance = await connection.getBalance(fromPubkey);
+      const userWalletBalance = await connection.getBalance(publicKey);
+      setUserBalance(userWalletBalance / 1e9);
+      
+      console.log('From Pubkey Balance:', fromBalance / 1e9,userWalletBalance/1e9, 'SOL');
+
+      if (fromBalance < SOL_FLIP_AMOUNT) {
+        throw new Error('Insufficient funds in the fromPubkey account.');
+      }
+      // Sign the transaction with the house's keypair if the house is sending SOL
 
       const transaction = new Transaction().add(
         SystemProgram.transfer({
           fromPubkey,
           toPubkey,
-          lamports: COIN_FLIP_AMOUNT,
+          lamports: SOL_FLIP_AMOUNT,
         })
       );
 
+      if (isHeads) {
+        console.log(houseKeypair.publicKey, "house public key")
+        // transaction.feePayer = houseKeypair.publicKey;
+
+        // transaction.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
+        // transaction.sign(houseKeypair);
+        // await sendAndConfirmTransaction(connection, transaction, [keypair]);
+        const signature = await connection.sendTransaction(transaction, [keypair], {
+          skipPreflight: false,
+          preflightCommitment: "confirmed",
+        });
+        await connection.confirmTransaction(signature, "confirmed");
+        setResult(isHeads ? 'You win 0.01 SOL!' : 'You lose 0.01 SOL.');
+        return
+      }
+
       const signature = await sendTransaction(transaction, connection);
-      await connection.confirmTransaction(signature, 'processed');
+      const confirmation = await connection.confirmTransaction(signature, 'processed');
+      // const fromTokenAccount = await getOrCreateAssociatedTokenAccount(
+      //   connection,
+      //   userPublicKey,
+      //   bonkMintAddress,
+      //   fromPubkey
+      // );
+
+      // const toTokenAccount = await getOrCreateAssociatedTokenAccount(
+      //   connection,
+      //   userPublicKey,
+      //   bonkMintAddress,
+      //   toPubkey
+      // );
+      // const transferInstruction = createTransferInstruction(
+      //   fromTokenAccount.address,
+      //   toTokenAccount.address,
+      //   fromPubkey,
+      //   BONK_FLIP_AMOUNT,
+      //   [],
+      //   TOKEN_PROGRAM_ID
+      // );
+
+
+      // const transaction = new Transaction().add(transferInstruction);
+
+      // const signature = await sendTransaction(transaction, connection);
+
+      // await connection.confirmTransaction(signature, 'confirmed');
+      if (confirmation.value.err) {
+        throw new Error('Transaction confirmation failed');
+      }
 
       setResult(isHeads ? 'You win 0.01 SOL!' : 'You lose 0.01 SOL.');
     } catch (error) {
@@ -115,6 +196,7 @@ const CoinFlip = ({ coinFace = [heads, tails] }) => {
     // </div>
     <div className="CoinToss">
       <h1>Coin Toss</h1>
+      
       <div className="flip-coin">
         <div className={flipCoinInner}>
           <div className="flip-coin-front">
@@ -132,6 +214,7 @@ const CoinFlip = ({ coinFace = [heads, tails] }) => {
       <p>
         Out of {flips}, there has been {headsCount} heads and {tailsCount} tails.
       </p>
+      
       { }
       {result && <p>{result}</p>}
     </div>
